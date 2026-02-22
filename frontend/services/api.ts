@@ -5,16 +5,15 @@
  * falling back to http://localhost:8000 for local dev.
  */
 
-import { Platform } from 'react-native';
+import { Platform } from "react-native";
 
 // Android emulator uses 10.0.2.2 to reach host machine's localhost
 const DEFAULT_URL = Platform.select({
-  android: 'http://10.0.2.2:8000',
-  default: 'http://localhost:8000',
+  android: "http://10.0.2.2:8000",
+  default: "http://localhost:8000",
 });
 
-const BASE_URL =
-  process.env.EXPO_PUBLIC_API_URL ?? DEFAULT_URL;
+const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? DEFAULT_URL;
 
 // ─── OCR Types ──────────────────────────────────────────────
 
@@ -50,19 +49,19 @@ export interface OCRResponse {
  */
 export async function uploadForOCR(
   imageUri: string,
-  filename = 'scan.jpg',
+  filename = "scan.jpg",
 ): Promise<OCRResponse> {
   const formData = new FormData();
 
   // React Native FormData accepts { uri, name, type } objects
-  formData.append('file', {
+  formData.append("file", {
     uri: imageUri,
     name: filename,
-    type: 'image/jpeg',
+    type: "image/jpeg",
   } as any);
 
   const res = await fetch(`${BASE_URL}/api/v1/ocr/extract`, {
-    method: 'POST',
+    method: "POST",
     body: formData,
     // Don't set Content-Type — fetch sets it with the boundary
   });
@@ -84,15 +83,15 @@ export async function uploadMultipleForOCR(
   const formData = new FormData();
 
   for (const img of images) {
-    formData.append('files', {
+    formData.append("files", {
       uri: img.uri,
       name: img.filename,
-      type: 'image/jpeg',
+      type: "image/jpeg",
     } as any);
   }
 
   const res = await fetch(`${BASE_URL}/api/v1/ocr/extract-multiple`, {
-    method: 'POST',
+    method: "POST",
     body: formData,
   });
 
@@ -171,8 +170,8 @@ export async function predictFromFeatures(
   features: PredictionRequest,
 ): Promise<PredictionResponse> {
   const res = await fetch(`${BASE_URL}/api/v1/predictions/from-features`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(features),
   });
 
@@ -190,9 +189,7 @@ export async function predictFromFeatures(
 export async function getExplanation(
   predictionId: string,
 ): Promise<ExplanationResponse> {
-  const res = await fetch(
-    `${BASE_URL}/api/v1/explain/${predictionId}`,
-  );
+  const res = await fetch(`${BASE_URL}/api/v1/explain/${predictionId}`);
 
   if (!res.ok) {
     const body = await res.text();
