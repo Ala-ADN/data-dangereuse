@@ -17,14 +17,13 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from app.services.ocr.field_map import (
     ALIAS_TO_CANONICAL,
     ALL_COLUMNS,
     FIELD_BY_NAME,
-    FieldSpec,
 )
 
 logger = logging.getLogger(__name__)
@@ -189,7 +188,7 @@ def parse_text(
         ParseResult with all matched fields and unmatched lines.
     """
     lines = raw_text.strip().split("\n")
-    lines = [l.strip() for l in lines if l.strip()]
+    lines = [line.strip() for line in lines if line.strip()]
 
     if line_confidences is None:
         line_confidences = [0.8] * len(lines)

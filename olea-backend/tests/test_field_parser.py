@@ -8,8 +8,6 @@ Tests the core logic without needing Tesseract installed:
 - Full parse pipeline
 """
 
-import pytest
-
 from app.services.ocr.field_parser import (
     parse_text,
     fields_to_dict,
@@ -21,7 +19,7 @@ from app.services.ocr.field_parser import (
     _find_field_boundaries,
     _resplit_lines,
 )
-from app.services.ocr.field_map import FIELD_BY_NAME, FieldType
+from app.services.ocr.field_map import FIELD_BY_NAME
 
 
 # ─── Key-Value Splitting ───────────────────────────────────
@@ -361,7 +359,7 @@ class TestMultiFieldParsing:
 
     def test_all_fields_extracted(self):
         result = parse_text(self.MULTI_LINE_TEXT)
-        fields = fields_to_dict(result)
+        _fields = fields_to_dict(result)
         statuses = fields_to_status_dict(result)
 
         # Every field from the form should be extracted, not "missing"
