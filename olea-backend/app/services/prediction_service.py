@@ -17,6 +17,17 @@ logger = logging.getLogger(__name__)
 _ARTIFACTS_CACHE = None
 MODEL_VERSION = "v1.0.0"
 
+# Default values for fields the frontend may not send
+_RAW_DEFAULTS = {
+    "Policy_Cancelled_Post_Purchase": 0,
+    "Policy_Start_Year": 2025,
+    "Policy_Start_Week": 1,
+    "Policy_Start_Day": 1,
+    "Grace_Period_Extensions": 0,
+    "Existing_Policyholder": 0,
+    "Policy_Amendments_Count": 0,
+}
+
 
 def _load_artifacts() -> dict:
     global _ARTIFACTS_CACHE
@@ -25,7 +36,6 @@ def _load_artifacts() -> dict:
 
     model_path = settings.PREDICTION_MODEL_PATH
 
-    # Path 1: compressed binary blob
     dat_path = os.path.join(model_path, "model.dat")
     if os.path.exists(dat_path):
         with open(dat_path, "rb") as f:
@@ -34,7 +44,6 @@ def _load_artifacts() -> dict:
         logger.info("Loaded model from %s", dat_path)
         return _ARTIFACTS_CACHE
 
-    # Path 2: standard pickle
     pkl_path = os.path.join(model_path, "model.pkl")
     if os.path.exists(pkl_path):
         _ARTIFACTS_CACHE = joblib.load(pkl_path)
@@ -45,12 +54,17 @@ def _load_artifacts() -> dict:
 
 
 def _preprocess(df: pd.DataFrame, artifacts: dict) -> pd.DataFrame:
-    """Apply the same feature engineering pipeline used during training."""
+    """Exact preprocessing pipeline matching the trained XGB model."""
     label_encoders = artifacts["label_encoders"]
     region_freq = artifacts["region_freq"]
     broker_freq = artifacts["broker_freq"]
 
     df = df.copy()
+
+    # Fill in raw columns that might be missing with sensible defaults
+    for col, default in _RAW_DEFAULTS.items():
+        if col not in df.columns:
+            df[col] = default
 
     if "Employer_ID" in df.columns:
         df.drop(columns=["Employer_ID"], inplace=True)
@@ -96,13 +110,44 @@ def _preprocess(df: pd.DataFrame, artifacts: dict) -> pd.DataFrame:
     return df
 
 
-def _run_inference(df: pd.DataFrame, artifacts: dict) -> tuple[np.ndarray, np.ndarray | None]:
-    """Run model inference, return (predictions, probabilities_or_None)."""
+def _compute_explanation(model, feature_cols: list[str], X: np.ndarray, proba: np.ndarray | None) -> dict:
+    """Compute XGBoost feature importance and return as a storable dict."""
+    if hasattr(model, "feature_importances_"):
+        importances = model.feature_importances_.astype(float)
+    else:
+        importances = np.ones(len(feature_cols)) / len(feature_cols)
+
+    indices = np.argsort(importances)[::-1]
+
+    feature_importances = []
+    for i in indices:
+        if importances[i] <= 0:
+            continue
+        feature_importances.append({
+            "feature": feature_cols[int(i)],
+            "importance": round(float(importances[i]), 6),
+        })
+
+    top_5 = ", ".join(f["feature"] for f in feature_importances[:5])
+
+    return {
+        "method": "xgb_feature_importance",
+        "feature_importances": feature_importances,
+        "summary": f"Top contributing features: {top_5}.",
+    }
+
+
+async def run_prediction(db: AsyncSession, form_id: UUID, form_data: dict) -> Prediction:
+    """Preprocess features, run XGB inference, compute explainability, save all to DB."""
+    artifacts = _load_artifacts()
     feature_cols = artifacts["feature_cols"]
     thresholds = artifacts.get("thresholds")
     model = artifacts["model"]
 
-    X = np.ascontiguousarray(df[feature_cols].values, dtype=np.float32)
+    df = pd.DataFrame([form_data])
+    df_processed = _preprocess(df, artifacts)
+
+    X = np.ascontiguousarray(df_processed[feature_cols].values, dtype=np.float32)
 
     proba = None
     if thresholds is not None:
@@ -112,17 +157,6 @@ def _run_inference(df: pd.DataFrame, artifacts: dict) -> tuple[np.ndarray, np.nd
         preds = model.predict(X)
         if hasattr(model, "predict_proba"):
             proba = model.predict_proba(X)
-
-    return preds, proba
-
-
-async def run_prediction(db: AsyncSession, form_id: UUID, form_data: dict) -> Prediction:
-    """Run the coverage-bundle prediction model on form data."""
-    artifacts = _load_artifacts()
-
-    df = pd.DataFrame([form_data])
-    df_processed = _preprocess(df, artifacts)
-    preds, proba = _run_inference(df_processed, artifacts)
 
     predicted_bundle = int(preds[0])
     confidence = float(proba[0].max()) if proba is not None else 0.0
@@ -134,11 +168,14 @@ async def run_prediction(db: AsyncSession, form_id: UUID, form_data: dict) -> Pr
     if proba is not None:
         result["probabilities"] = {str(i): round(float(p), 4) for i, p in enumerate(proba[0])}
 
+    explanation = _compute_explanation(model, feature_cols, X, proba)
+
     prediction = Prediction(
         form_id=form_id,
         model_version=MODEL_VERSION,
         result=result,
         confidence=confidence,
+        explanation=explanation,
     )
     db.add(prediction)
     await db.commit()

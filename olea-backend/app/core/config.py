@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     OCR_MODEL_PATH: str = "/models/ocr"
     PREDICTION_MODEL_PATH: str = "/models/prediction"
 
+    OPENAI_API_KEY: str = ""
+
     CORS_ORIGINS: list[str] = ["*"]
 
     class Config:

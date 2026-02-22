@@ -5,37 +5,14 @@ EXPECTED_FIELDS = [
     "Previous_Claims_Filed", "Years_Without_Claims", "Deductible_Tier",
     "Vehicles_on_Policy", "Custom_Riders_Requested", "Acquisition_Channel",
     "Payment_Schedule", "Days_Since_Quote", "Underwriting_Processing_Days",
-    "Policy_Start_Month",
+    "Policy_Start_Month", "Policy_Cancelled_Post_Purchase", "Policy_Start_Year",
+    "Policy_Start_Week", "Policy_Start_Day", "Grace_Period_Extensions",
+    "Existing_Policyholder", "Policy_Amendments_Count",
 ]
 
 
 async def extract_document(file_bytes: bytes, filename: str) -> dict:
     """Extract insurance form fields from an uploaded document.
-
-    The OCR pipeline should extract the following fields required by the
-    prediction model:
-
-    - User_ID:                        Policyholder identifier
-    - Region_Code:                    Geographic region code
-    - Broker_ID:                      Broker identifier (nullable)
-    - Broker_Agency_Type:             Type of broker agency
-    - Employer_ID:                    Employer identifier (often missing)
-    - Estimated_Annual_Income:        Annual income estimate
-    - Employment_Status:              Employment category
-    - Adult_Dependents:               Number of adult dependents
-    - Child_Dependents:               Number of child dependents (nullable)
-    - Infant_Dependents:              Number of infant dependents
-    - Previous_Policy_Duration_Months: Prior policy duration in months
-    - Previous_Claims_Filed:          Number of prior claims
-    - Years_Without_Claims:           Claim-free years
-    - Deductible_Tier:                Deductible tier level
-    - Vehicles_on_Policy:             Vehicles covered
-    - Custom_Riders_Requested:        Number of custom riders
-    - Acquisition_Channel:            How the customer was acquired
-    - Payment_Schedule:               Payment frequency
-    - Days_Since_Quote:               Days since initial quote
-    - Underwriting_Processing_Days:   Underwriting turnaround
-    - Policy_Start_Month:             Month name (e.g. "January")
 
     TODO: Replace stub with actual OCR engine (Tesseract / PaddleOCR / AWS Textract).
     """

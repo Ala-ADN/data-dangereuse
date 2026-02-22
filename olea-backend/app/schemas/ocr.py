@@ -24,6 +24,13 @@ class InsuranceFormFields(BaseModel):
     Days_Since_Quote: int | None = None
     Underwriting_Processing_Days: int | None = None
     Policy_Start_Month: str | None = None
+    Policy_Cancelled_Post_Purchase: int | None = None
+    Policy_Start_Year: int | None = None
+    Policy_Start_Week: int | None = None
+    Policy_Start_Day: int | None = None
+    Grace_Period_Extensions: int | None = None
+    Existing_Policyholder: int | None = None
+    Policy_Amendments_Count: int | None = None
 
 
 class OCRResponse(BaseModel):
