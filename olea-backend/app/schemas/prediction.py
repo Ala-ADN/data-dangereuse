@@ -8,10 +8,37 @@ class PredictionRequest(BaseModel):
     form_id: UUID
 
 
-class PredictionResult(BaseModel):
-    purchased_coverage_bundle: int
-    confidence: float
-    probabilities: dict[str, float] | None = None
+class PredictionFromFeaturesRequest(BaseModel):
+    """Direct prediction from raw features sent by the frontend."""
+    User_ID: str | None = None
+    Region_Code: str | None = None
+    Broker_ID: float | None = None
+    Broker_Agency_Type: str | None = None
+    Employer_ID: str | None = None
+    Estimated_Annual_Income: float
+    Employment_Status: str
+    Adult_Dependents: int
+    Child_Dependents: int | None = None
+    Infant_Dependents: int
+    Previous_Policy_Duration_Months: int
+    Previous_Claims_Filed: int
+    Years_Without_Claims: int
+    Deductible_Tier: str | None = None
+    Vehicles_on_Policy: int
+    Custom_Riders_Requested: int
+    Acquisition_Channel: str | None = None
+    Payment_Schedule: str
+    Days_Since_Quote: int
+    Underwriting_Processing_Days: int
+    Policy_Start_Month: str
+    # Additional fields required by the XGB model
+    Policy_Cancelled_Post_Purchase: int = 0
+    Policy_Start_Year: int = 2025
+    Policy_Start_Week: int = 1
+    Policy_Start_Day: int = 1
+    Grace_Period_Extensions: int = 0
+    Existing_Policyholder: int = 0
+    Policy_Amendments_Count: int = 0
 
 
 class PredictionResponse(BaseModel):
