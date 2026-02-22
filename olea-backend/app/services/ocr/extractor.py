@@ -7,7 +7,6 @@ Returns text + overall OCR confidence score.
 
 from __future__ import annotations
 
-import io
 import logging
 from dataclasses import dataclass
 from typing import Optional
@@ -134,8 +133,8 @@ def _try_easyocr(img: Image.Image, lang: str) -> Optional[ExtractionResult]:
         # Map tesseract lang codes to EasyOCR
         lang_map = {"eng": "en", "fra": "fr", "ara": "ar"}
         easyocr_langs = []
-        for l in lang.split("+"):
-            mapped = lang_map.get(l, l)
+        for lang_code in lang.split("+"):
+            mapped = lang_map.get(lang_code, lang_code)
             if mapped not in easyocr_langs:
                 easyocr_langs.append(mapped)
 
