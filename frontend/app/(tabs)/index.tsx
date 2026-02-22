@@ -18,6 +18,7 @@ import {
   Easing,
 } from 'react-native';
 import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import * as DocumentPicker from 'expo-document-picker';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // OLEA INSURANCE — Design Tokens
@@ -565,10 +566,10 @@ function HomeView({ onNavigate }: { onNavigate: (s: Screen) => void }) {
             activeOpacity={0.85}
           >
             <View style={s.homeBtnIcon}>
-              <Ionicons name="camera" size={22} color={C.white} />
+              <Ionicons name="cloud-upload-outline" size={22} color={C.white} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.homePrimaryBtnText}>Scan a document</Text>
+              <Text style={s.homePrimaryBtnText}>Upload a document</Text>
               <Text style={s.homePrimaryBtnHint}>Recommended — fastest way</Text>
             </View>
             <Ionicons name="arrow-forward" size={20} color={C.white} />
@@ -612,131 +613,226 @@ function ScannerView({
   onNavigate: (s: Screen) => void;
   onScanComplete: () => void;
 }) {
-  const [scanning, setScanning] = useState(false);
+  const [phase, setPhase] = useState<'upload' | 'scanning' | 'done'>('upload');
+  const [fileName, setFileName] = useState<string | null>(null);
   const scanLine = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const uploadIconBounce = useRef(new Animated.Value(0)).current;
   const anim = useFadeIn(400);
 
-  // Scan line loop
+  // Bounce animation for the upload area icon
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
+        Animated.timing(uploadIconBounce, {
+          toValue: -8,
+          duration: 1200,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(uploadIconBounce, {
+          toValue: 0,
+          duration: 1200,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, []);
+
+  // Scan line loop (only active during scanning)
+  useEffect(() => {
+    if (phase !== 'scanning') return;
+    scanLine.setValue(0);
+    const loop = Animated.loop(
+      Animated.sequence([
         Animated.timing(scanLine, {
           toValue: 1,
-          duration: 2000,
+          duration: 1800,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(scanLine, {
           toValue: 0,
-          duration: 2000,
+          duration: 1800,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ])
-    ).start();
-  }, []);
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [phase]);
 
-  // Pulse for shutter button
+  // Pulse for upload button
   useEffect(() => {
-    Animated.loop(
+    if (phase !== 'upload') return;
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
-          toValue: 1.08,
-          duration: 900,
+          toValue: 1.05,
+          duration: 1000,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(pulseAnim, {
           toValue: 1,
-          duration: 900,
+          duration: 1000,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ])
-    ).start();
-  }, []);
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [phase]);
 
   const lineTranslateY = scanLine.interpolate({
     inputRange: [0, 1],
     outputRange: [0, 220],
   });
 
-  const handleCapture = () => {
-    setScanning(true);
-    setTimeout(() => {
-      onScanComplete();
-      onNavigate('Form');
-    }, 2500);
+  const handlePickFile = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['image/*', 'application/pdf'],
+        copyToCacheDirectory: true,
+      });
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const picked = result.assets[0];
+        setFileName(picked.name ?? 'document');
+        // Transition to scanning phase
+        setPhase('scanning');
+        // After 2.5s of scanning animation, proceed
+        setTimeout(() => {
+          setPhase('done');
+          onScanComplete();
+          onNavigate('Form');
+        }, 2500);
+      }
+    } catch (_err) {
+      // User cancelled or error — stay on upload
+    }
   };
+
+  const isScanning = phase === 'scanning';
 
   return (
     <SafeAreaView style={s.scanContainer}>
       <Animated.View style={[{ flex: 1 }, anim]}>
-        <ScreenHeader title="Scan Document" onBack={() => onNavigate('Home')} />
+        <ScreenHeader title="Upload Document" onBack={() => onNavigate('Home')} />
 
         <View style={s.scanBody}>
-          {/* Viewfinder */}
-          <View style={s.viewfinder}>
-            {/* Corner brackets */}
-            <View style={[s.corner, s.cornerTL]} />
-            <View style={[s.corner, s.cornerTR]} />
-            <View style={[s.corner, s.cornerBL]} />
-            <View style={[s.corner, s.cornerBR]} />
-
-            {/* Scan line */}
-            <Animated.View
-              style={[
-                s.scanLineBar,
-                { transform: [{ translateY: lineTranslateY }] },
-              ]}
-            />
-
-            {/* Center icon */}
-            <View style={s.scanCenterIcon}>
-              <MaterialCommunityIcons
-                name="file-document-outline"
-                size={48}
-                color="rgba(248,175,60,0.3)"
-              />
-            </View>
-
-            {scanning && (
-              <View style={s.scanOverlay}>
-                <ActivityIndicator size="large" color={C.primary} />
-                <Text style={s.scanOverlayText}>
-                  AI analyzing document...
+          {phase === 'upload' ? (
+            /* ── Upload State ── */
+            <View style={s.uploadArea}>
+              <TouchableOpacity
+                style={s.uploadDropzone}
+                onPress={handlePickFile}
+                activeOpacity={0.8}
+              >
+                <Animated.View style={{ transform: [{ translateY: uploadIconBounce }] }}>
+                  <View style={s.uploadIconCircle}>
+                    <Ionicons name="cloud-upload-outline" size={40} color={C.primary} />
+                  </View>
+                </Animated.View>
+                <Text style={s.uploadTitle}>Upload your document</Text>
+                <Text style={s.uploadSubtitle}>
+                  PDF, JPG, or PNG — tap to browse files
                 </Text>
+                <View style={s.uploadFormats}>
+                  <View style={s.uploadFormatTag}>
+                    <Text style={s.uploadFormatText}>PDF</Text>
+                  </View>
+                  <View style={s.uploadFormatTag}>
+                    <Text style={s.uploadFormatText}>JPG</Text>
+                  </View>
+                  <View style={s.uploadFormatTag}>
+                    <Text style={s.uploadFormatText}>PNG</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            /* ── Scanning State ── */
+            <View style={{ alignItems: 'center' }}>
+              <View style={s.viewfinder}>
+                {/* Corner brackets */}
+                <View style={[s.corner, s.cornerTL]} />
+                <View style={[s.corner, s.cornerTR]} />
+                <View style={[s.corner, s.cornerBL]} />
+                <View style={[s.corner, s.cornerBR]} />
+
+                {/* Scan line */}
+                <Animated.View
+                  style={[
+                    s.scanLineBar,
+                    { transform: [{ translateY: lineTranslateY }] },
+                  ]}
+                />
+
+                {/* Center file icon */}
+                <View style={s.scanCenterIcon}>
+                  <MaterialCommunityIcons
+                    name="file-document-outline"
+                    size={48}
+                    color="rgba(248,175,60,0.4)"
+                  />
+                </View>
+
+                {/* Overlay with spinner */}
+                <View style={s.scanOverlay}>
+                  <ActivityIndicator size="large" color={C.primary} />
+                  <Text style={s.scanOverlayText}>
+                    AI analyzing document...
+                  </Text>
+                </View>
               </View>
-            )}
-          </View>
+
+              {/* Show selected file name */}
+              {fileName && (
+                <View style={s.fileNamePill}>
+                  <Ionicons name="document-text-outline" size={16} color={C.primary} />
+                  <Text style={s.fileNameText} numberOfLines={1}>{fileName}</Text>
+                </View>
+              )}
+            </View>
+          )}
 
           <Text style={s.scanHint}>
-            Position your insurance document within the frame
+            {phase === 'upload'
+              ? 'Select your insurance document to get started'
+              : 'Extracting data from your document…'}
           </Text>
         </View>
 
-        {/* Shutter Button */}
+        {/* Footer Button */}
         <View style={s.scanFooter}>
-          <Animated.View style={{ transform: [{ scale: scanning ? 1 : pulseAnim }] }}>
-            <TouchableOpacity
-              style={[s.shutterBtn, scanning && { opacity: 0.5 }]}
-              onPress={handleCapture}
-              disabled={scanning}
-              activeOpacity={0.8}
-            >
-              <View style={s.shutterInner}>
-                {scanning ? (
+          {phase === 'upload' ? (
+            <>
+              <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+                <TouchableOpacity
+                  style={s.shutterBtn}
+                  onPress={handlePickFile}
+                  activeOpacity={0.8}
+                >
+                  <View style={s.shutterInner}>
+                    <Ionicons name="folder-open-outline" size={28} color={C.white} />
+                  </View>
+                </TouchableOpacity>
+              </Animated.View>
+              <Text style={s.shutterLabel}>Browse Files</Text>
+            </>
+          ) : (
+            <>
+              <View style={[s.shutterBtn, { opacity: 0.5, borderColor: C.textPrimary }]}>
+                <View style={[s.shutterInner, { backgroundColor: C.textPrimary }]}>
                   <ActivityIndicator size="small" color={C.white} />
-                ) : (
-                  <Ionicons name="camera" size={28} color={C.white} />
-                )}
+                </View>
               </View>
-            </TouchableOpacity>
-          </Animated.View>
-          <Text style={s.shutterLabel}>
-            {scanning ? 'Processing…' : 'Take Photo'}
-          </Text>
+              <Text style={s.shutterLabel}>Processing…</Text>
+            </>
+          )}
         </View>
       </Animated.View>
     </SafeAreaView>
@@ -1691,6 +1787,80 @@ const s = StyleSheet.create({
     fontWeight: '600',
     marginTop: 10,
     letterSpacing: 0.5,
+  },
+
+  /* ─── Upload State ─── */
+  uploadArea: {
+    width: '100%',
+    paddingHorizontal: 16,
+  },
+  uploadDropzone: {
+    borderWidth: 2,
+    borderColor: 'rgba(248,175,60,0.35)',
+    borderStyle: 'dashed',
+    borderRadius: R.xl,
+    backgroundColor: 'rgba(248,175,60,0.06)',
+    paddingVertical: 40,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+  },
+  uploadIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(248,175,60,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  uploadTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: C.white,
+    marginBottom: 6,
+    letterSpacing: 0.3,
+  },
+  uploadSubtitle: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.5)',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  uploadFormats: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  uploadFormatTag: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: R.sm,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  uploadFormatText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.55)',
+    letterSpacing: 1,
+  },
+  fileNamePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(248,175,60,0.15)',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: R.full,
+    marginTop: 18,
+    maxWidth: SCREEN_W - 100,
+  },
+  fileNameText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: C.primary,
+    flexShrink: 1,
   },
 
   /* ═══ FORM ═══ */
