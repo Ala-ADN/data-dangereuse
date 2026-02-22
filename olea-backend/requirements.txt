@@ -10,3 +10,13 @@ pandas==2.2.3
 numpy==2.1.3
 scikit-learn==1.6.1
 joblib==1.4.2
+
+# ── OCR dependencies ────────────────────────
+Pillow==11.1.0
+pytesseract==0.3.13
+rapidfuzz==3.11.0
+# Optional: PDF support (requires poppler system package)
+# pdf2image==1.17.0
+# Optional: EasyOCR fallback (heavy, GPU-optional)
+# easyocr==1.7.2
+
