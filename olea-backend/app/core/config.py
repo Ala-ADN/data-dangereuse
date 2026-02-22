@@ -13,6 +13,13 @@ class Settings(BaseSettings):
 
     OPENAI_API_KEY: str = ""
 
+    # Redis cache
+    REDIS_URL: str = "redis://localhost:6379/0"
+    CACHE_TTL: int = 86400  # 24 hours
+
+    # MLflow
+    MLFLOW_TRACKING_URI: str = ""
+
     CORS_ORIGINS: list[str] = ["*"]
 
     class Config:

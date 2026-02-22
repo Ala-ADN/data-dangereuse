@@ -2,6 +2,7 @@ import io
 import logging
 import lzma
 import os
+import time
 from uuid import UUID
 
 import joblib
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.models.prediction import Prediction
+from app.services import cache_service, mlflow_service
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +141,34 @@ def _compute_explanation(model, feature_cols: list[str], X: np.ndarray, proba: n
 
 async def run_prediction(db: AsyncSession, form_id: UUID, form_data: dict) -> Prediction:
     """Preprocess features, run XGB inference, compute explainability, save all to DB."""
+    t0 = time.perf_counter()
+
+    # ── 1. Check Redis cache ─────────────────────────────
+    cached = await cache_service.get_cached_prediction(form_data)
+    if cached:
+        prediction = Prediction(
+            form_id=form_id,
+            model_version=cached.get("model_version", MODEL_VERSION),
+            result=cached["result"],
+            confidence=cached["confidence"],
+            explanation=cached.get("explanation"),
+        )
+        db.add(prediction)
+        await db.commit()
+        await db.refresh(prediction)
+
+        latency_ms = (time.perf_counter() - t0) * 1000
+        mlflow_service.log_prediction(
+            features=form_data,
+            predicted_bundle=cached["result"].get("purchased_coverage_bundle", -1),
+            confidence=cached["confidence"],
+            latency_ms=latency_ms,
+            cached=True,
+            model_version=cached.get("model_version", MODEL_VERSION),
+        )
+        return prediction
+
+    # ── 2. Run inference ─────────────────────────────────
     artifacts = _load_artifacts()
     feature_cols = artifacts["feature_cols"]
     thresholds = artifacts.get("thresholds")
@@ -180,6 +210,29 @@ async def run_prediction(db: AsyncSession, form_id: UUID, form_data: dict) -> Pr
     db.add(prediction)
     await db.commit()
     await db.refresh(prediction)
+
+    # ── 3. Write to Redis cache ──────────────────────────
+    cache_payload = {
+        "result": result,
+        "confidence": confidence,
+        "explanation": explanation,
+        "model_version": MODEL_VERSION,
+    }
+    await cache_service.set_cached_prediction(
+        form_data, cache_payload, ttl=settings.CACHE_TTL,
+    )
+
+    # ── 4. Log to MLflow ─────────────────────────────────
+    latency_ms = (time.perf_counter() - t0) * 1000
+    mlflow_service.log_prediction(
+        features=form_data,
+        predicted_bundle=predicted_bundle,
+        confidence=confidence,
+        latency_ms=latency_ms,
+        cached=False,
+        model_version=MODEL_VERSION,
+    )
+
     return prediction
 
 
