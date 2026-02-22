@@ -1,7 +1,10 @@
+from __future__ import annotations
+
+import re
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class PredictionRequest(BaseModel):
@@ -13,6 +16,18 @@ class PredictionFromFeaturesRequest(BaseModel):
     User_ID: str | None = None
     Region_Code: str | None = None
     Broker_ID: float | None = None
+
+    @field_validator("Broker_ID", mode="before")
+    @classmethod
+    def coerce_broker_id(cls, v: object) -> float | None:
+        """Accept 'BRK-4421' style strings → extract numeric part → 4421.0."""
+        if v is None or v == "":
+            return None
+        if isinstance(v, (int, float)):
+            return float(v)
+        s = str(v)
+        m = re.search(r"[\d.]+", s)
+        return float(m.group()) if m else None
     Broker_Agency_Type: str | None = None
     Employer_ID: str | None = None
     Estimated_Annual_Income: float

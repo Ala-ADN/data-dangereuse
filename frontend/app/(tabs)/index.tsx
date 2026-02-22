@@ -16,8 +16,21 @@ import {
   Dimensions,
   Pressable,
   Easing,
+  Alert,
+  Image,
 } from 'react-native';
 import { Ionicons, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import {
+  uploadForOCR,
+  predictFromFeatures,
+  getExplanation,
+  type OCRResponse,
+  type PredictionRequest,
+  type PredictionResponse,
+  type ExplanationResponse,
+  type FeatureImportance,
+} from '@/services/api';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // OLEA INSURANCE — Design Tokens
@@ -71,60 +84,105 @@ const { width: SCREEN_W } = Dimensions.get('window');
 
 type Screen = 'Home' | 'Scanner' | 'Form' | 'Result';
 
+// ── Form data mirrors all 27 backend OCR columns ──
 interface FormData {
-  estimatedAnnualIncome: string;
-  employmentStatus: string;
-  adultDependents: number;
-  childDependents: number;
-  infantDependents: number;
-  regionCode: string;
-  existingPolicyholder: boolean;
-  previousClaimsFiled: string;
-  yearsWithoutClaims: string;
-  previousPolicyDuration: string;
-  policyCancelledPostPurchase: boolean;
-  deductibleTier: string;
-  paymentSchedule: string;
-  vehiclesOnPolicy: number;
-  customRidersRequested: string;
-  gracePeriodExtensions: string;
-  brokerId: string;
-  policyStartDate: string;
-  underwritingProcessingDays: string;
+  // Demographics & Financials
+  Adult_Dependents: string;
+  Child_Dependents: string;
+  Infant_Dependents: string;
+  Estimated_Annual_Income: string;
+  Employment_Status: string;
+  Region_Code: string;
+  // Customer History & Risk Profile
+  Existing_Policyholder: boolean;
+  Previous_Claims_Filed: string;
+  Years_Without_Claims: string;
+  Previous_Policy_Duration_Months: string;
+  Policy_Cancelled_Post_Purchase: boolean;
+  // Policy Details & Preferences
+  Deductible_Tier: string;
+  Payment_Schedule: string;
+  Vehicles_on_Policy: string;
+  Custom_Riders_Requested: string;
+  Grace_Period_Extensions: string;
+  // Sales & Underwriting
+  Days_Since_Quote: string;
+  Underwriting_Processing_Days: string;
+  Policy_Amendments_Count: string;
+  Acquisition_Channel: string;
+  Broker_Agency_Type: string;
+  Broker_ID: string;
+  Employer_ID: string;
+  // Timeline
+  Policy_Start_Year: string;
+  Policy_Start_Month: string;
+  Policy_Start_Week: string;
+  Policy_Start_Day: string;
 }
 
 const EMPTY_FORM: FormData = {
-  estimatedAnnualIncome: '',
-  employmentStatus: '',
-  adultDependents: 0,
-  childDependents: 0,
-  infantDependents: 0,
-  regionCode: '',
-  existingPolicyholder: false,
-  previousClaimsFiled: '',
-  yearsWithoutClaims: '',
-  previousPolicyDuration: '',
-  policyCancelledPostPurchase: false,
-  deductibleTier: '',
-  paymentSchedule: '',
-  vehiclesOnPolicy: 1,
-  customRidersRequested: '',
-  gracePeriodExtensions: '',
-  brokerId: 'BRK-2026-0847',
-  policyStartDate: '2026-03-01',
-  underwritingProcessingDays: '14',
+  Adult_Dependents: '',
+  Child_Dependents: '',
+  Infant_Dependents: '',
+  Estimated_Annual_Income: '',
+  Employment_Status: '',
+  Region_Code: '',
+  Existing_Policyholder: false,
+  Previous_Claims_Filed: '',
+  Years_Without_Claims: '',
+  Previous_Policy_Duration_Months: '',
+  Policy_Cancelled_Post_Purchase: false,
+  Deductible_Tier: '',
+  Payment_Schedule: '',
+  Vehicles_on_Policy: '',
+  Custom_Riders_Requested: '',
+  Grace_Period_Extensions: '',
+  Days_Since_Quote: '',
+  Underwriting_Processing_Days: '',
+  Policy_Amendments_Count: '',
+  Acquisition_Channel: '',
+  Broker_Agency_Type: '',
+  Broker_ID: '',
+  Employer_ID: '',
+  Policy_Start_Year: '',
+  Policy_Start_Month: '',
+  Policy_Start_Week: '',
+  Policy_Start_Day: '',
 };
 
-const AUTOFILL_FORM: Partial<FormData> = {
-  estimatedAnnualIncome: '72000',
-  employmentStatus: 'Employed',
-  adultDependents: 1,
-  childDependents: 2,
-  infantDependents: 1,
-  regionCode: 'CA-90210',
+/** Which form keys were auto-filled by OCR (dynamic, set after scan). */
+type OCRMeta = {
+  filledKeys: Set<keyof FormData>;
+  fieldStatuses: Record<string, string>;
+  fieldConfidences: Record<string, number>;
+  overallConfidence: number;
+  matchedCount: number;
+  totalFields: number;
 };
 
-const AUTOFILL_KEYS = Object.keys(AUTOFILL_FORM) as (keyof FormData)[];
+/** Bundle ID → display name */
+const BUNDLE_NAMES: Record<number, string> = {
+  0: 'Auto Comprehensive',
+  1: 'Auto Liability Basic',
+  2: 'Basic Health',
+  3: 'Family Comprehensive',
+  4: 'Health Dental Vision',
+  5: 'Home Premium',
+  6: 'Home Standard',
+  7: 'Premium Health & Life',
+  8: 'Renter Basic',
+  9: 'Renter Premium',
+};
+
+const BUNDLE_CATEGORIES: Record<number, string> = {
+  0: 'Auto', 1: 'Auto', 2: 'Health', 3: 'Family', 4: 'Health',
+  5: 'Home', 6: 'Home', 7: 'Health', 8: 'Renter', 9: 'Renter',
+};
+
+const BUNDLE_ICONS: Record<string, string> = {
+  Auto: 'car-sport', Health: 'medkit', Family: 'people',
+  Home: 'home', Renter: 'key', Life: 'heart',
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Animation Hook
@@ -602,7 +660,7 @@ function HomeView({ onNavigate }: { onNavigate: (s: Screen) => void }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Screen 2 — SCANNER (OCR Simulation)
+// Screen 2 — SCANNER (Real Camera + OCR)
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function ScannerView({
@@ -610,9 +668,11 @@ function ScannerView({
   onScanComplete,
 }: {
   onNavigate: (s: Screen) => void;
-  onScanComplete: () => void;
+  onScanComplete: (ocrResult: OCRResponse) => void;
 }) {
   const [scanning, setScanning] = useState(false);
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const scanLine = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const anim = useFadeIn(400);
@@ -662,12 +722,47 @@ function ScannerView({
     outputRange: [0, 220],
   });
 
-  const handleCapture = () => {
+  /** Pick an image then run OCR */
+  const pickAndScan = async (useCamera: boolean) => {
+    setError(null);
+
+    // Request permissions
+    if (useCamera) {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Camera access is required to scan documents.');
+        return;
+      }
+    }
+
+    const result = useCamera
+      ? await ImagePicker.launchCameraAsync({
+          mediaTypes: ['images'],
+          quality: 0.9,
+        })
+      : await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          quality: 0.9,
+        });
+
+    if (result.canceled || !result.assets?.length) return;
+
+    const asset = result.assets[0];
+    setPreviewUri(asset.uri);
     setScanning(true);
-    setTimeout(() => {
-      onScanComplete();
+
+    try {
+      const ocrResult = await uploadForOCR(
+        asset.uri,
+        asset.fileName ?? 'scan.jpg',
+      );
+      onScanComplete(ocrResult);
       onNavigate('Form');
-    }, 2500);
+    } catch (e: any) {
+      console.error('OCR failed:', e);
+      setError(e.message ?? 'OCR extraction failed');
+      setScanning(false);
+    }
   };
 
   return (
@@ -676,30 +771,40 @@ function ScannerView({
         <ScreenHeader title="Scan Document" onBack={() => onNavigate('Home')} />
 
         <View style={s.scanBody}>
-          {/* Viewfinder */}
+          {/* Viewfinder / Preview */}
           <View style={s.viewfinder}>
-            {/* Corner brackets */}
-            <View style={[s.corner, s.cornerTL]} />
-            <View style={[s.corner, s.cornerTR]} />
-            <View style={[s.corner, s.cornerBL]} />
-            <View style={[s.corner, s.cornerBR]} />
-
-            {/* Scan line */}
-            <Animated.View
-              style={[
-                s.scanLineBar,
-                { transform: [{ translateY: lineTranslateY }] },
-              ]}
-            />
-
-            {/* Center icon */}
-            <View style={s.scanCenterIcon}>
-              <MaterialCommunityIcons
-                name="file-document-outline"
-                size={48}
-                color="rgba(248,175,60,0.3)"
+            {previewUri ? (
+              <Image
+                source={{ uri: previewUri }}
+                style={StyleSheet.absoluteFillObject}
+                resizeMode="contain"
               />
-            </View>
+            ) : (
+              <>
+                {/* Corner brackets */}
+                <View style={[s.corner, s.cornerTL]} />
+                <View style={[s.corner, s.cornerTR]} />
+                <View style={[s.corner, s.cornerBL]} />
+                <View style={[s.corner, s.cornerBR]} />
+
+                {/* Scan line */}
+                <Animated.View
+                  style={[
+                    s.scanLineBar,
+                    { transform: [{ translateY: lineTranslateY }] },
+                  ]}
+                />
+
+                {/* Center icon */}
+                <View style={s.scanCenterIcon}>
+                  <MaterialCommunityIcons
+                    name="file-document-outline"
+                    size={48}
+                    color="rgba(248,175,60,0.3)"
+                  />
+                </View>
+              </>
+            )}
 
             {scanning && (
               <View style={s.scanOverlay}>
@@ -711,31 +816,51 @@ function ScannerView({
             )}
           </View>
 
-          <Text style={s.scanHint}>
-            Position your insurance document within the frame
-          </Text>
+          {error ? (
+            <View style={s.scanErrorBox}>
+              <Ionicons name="alert-circle" size={18} color={C.accent} />
+              <Text style={s.scanErrorText}>{error}</Text>
+            </View>
+          ) : (
+            <Text style={s.scanHint}>
+              Take a photo or pick an image of your insurance form
+            </Text>
+          )}
         </View>
 
-        {/* Shutter Button */}
+        {/* Action Buttons */}
         <View style={s.scanFooter}>
-          <Animated.View style={{ transform: [{ scale: scanning ? 1 : pulseAnim }] }}>
+          <View style={s.scanBtnRow}>
+            {/* Camera button */}
+            <Animated.View style={{ transform: [{ scale: scanning ? 1 : pulseAnim }] }}>
+              <TouchableOpacity
+                style={[s.shutterBtn, scanning && { opacity: 0.5 }]}
+                onPress={() => pickAndScan(true)}
+                disabled={scanning}
+                activeOpacity={0.8}
+              >
+                <View style={s.shutterInner}>
+                  {scanning ? (
+                    <ActivityIndicator size="small" color={C.white} />
+                  ) : (
+                    <Ionicons name="camera" size={28} color={C.white} />
+                  )}
+                </View>
+              </TouchableOpacity>
+            </Animated.View>
+
+            {/* Gallery picker */}
             <TouchableOpacity
-              style={[s.shutterBtn, scanning && { opacity: 0.5 }]}
-              onPress={handleCapture}
+              style={[s.galleryBtn, scanning && { opacity: 0.5 }]}
+              onPress={() => pickAndScan(false)}
               disabled={scanning}
               activeOpacity={0.8}
             >
-              <View style={s.shutterInner}>
-                {scanning ? (
-                  <ActivityIndicator size="small" color={C.white} />
-                ) : (
-                  <Ionicons name="camera" size={28} color={C.white} />
-                )}
-              </View>
+              <Ionicons name="images-outline" size={24} color={C.white} />
             </TouchableOpacity>
-          </Animated.View>
+          </View>
           <Text style={s.shutterLabel}>
-            {scanning ? 'Processing…' : 'Take Photo'}
+            {scanning ? 'Processing…' : 'Camera  ·  Gallery'}
           </Text>
         </View>
       </Animated.View>
@@ -751,14 +876,19 @@ function FormView({
   isAutoFilled,
   formData,
   setFormData,
+  ocrMeta,
   onNavigate,
+  onSubmitPrediction,
 }: {
   isAutoFilled: boolean;
   formData: FormData;
   setFormData: React.Dispatch<React.SetStateAction<FormData>>;
+  ocrMeta: OCRMeta | null;
   onNavigate: (s: Screen) => void;
+  onSubmitPrediction: (form: FormData) => Promise<void>;
 }) {
   const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const badgeAnim = useFadeIn(500, 0);
 
   const update = useCallback(
@@ -768,16 +898,29 @@ function FormView({
     [setFormData]
   );
 
+  /** Was this field auto-filled by OCR? */
   const isAF = (key: keyof FormData) =>
-    isAutoFilled && AUTOFILL_KEYS.includes(key as any);
+    isAutoFilled && (ocrMeta?.filledKeys.has(key) ?? false);
 
-  const handleSubmit = () => {
+  /** Get OCR status for a field (for the badge) */
+  const ocrStatus = (key: keyof FormData) =>
+    ocrMeta?.fieldStatuses[key] ?? 'missing';
+
+  const handleSubmit = async () => {
     setSubmitting(true);
-    setTimeout(() => {
+    setSubmitError(null);
+    try {
+      await onSubmitPrediction(formData);
+    } catch (e: any) {
+      console.error('Prediction failed:', e);
+      setSubmitError(e.message ?? 'Prediction request failed');
       setSubmitting(false);
-      onNavigate('Result');
-    }, 1800);
+    }
   };
+
+  const confidencePct = ocrMeta
+    ? Math.round(ocrMeta.overallConfidence * 100)
+    : 0;
 
   return (
     <SafeAreaView style={s.formContainer}>
@@ -796,14 +939,21 @@ function FormView({
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Auto-fill badge */}
-          {isAutoFilled && (
+          {/* Auto-fill confidence banner */}
+          {isAutoFilled && ocrMeta && (
             <Animated.View style={[s.autoFillNotice, badgeAnim]}>
               <Text style={s.autoFillNoticeIcon}>✨</Text>
-              <Text style={s.autoFillNoticeText}>
-                AI successfully extracted partial data. Please complete the
-                rest.
-              </Text>
+              <View style={{ flex: 1 }}>
+                <Text style={s.autoFillNoticeText}>
+                  OCR extracted{' '}
+                  <Text style={{ fontWeight: '800' }}>
+                    {ocrMeta.matchedCount}/{ocrMeta.totalFields}
+                  </Text>{' '}
+                  fields ({confidencePct}% confidence).
+                  {ocrMeta.matchedCount < ocrMeta.totalFields &&
+                    ' Please fill the remaining fields.'}
+                </Text>
+              </View>
             </Animated.View>
           )}
 
@@ -816,43 +966,49 @@ function FormView({
           >
             <LabeledInput
               label="Estimated Annual Income"
-              value={formData.estimatedAnnualIncome}
-              onChangeText={(t) => update('estimatedAnnualIncome', t)}
-              placeholder="e.g. 72000"
+              value={formData.Estimated_Annual_Income}
+              onChangeText={(t) => update('Estimated_Annual_Income', t)}
+              placeholder="e.g. 65000"
               keyboardType="numeric"
-              isAutoFilled={isAF('estimatedAnnualIncome')}
+              isAutoFilled={isAF('Estimated_Annual_Income')}
             />
             <Dropdown
               label="Employment Status"
-              value={formData.employmentStatus}
-              options={['Employed', 'Self-Employed', 'Unemployed']}
-              onSelect={(v) => update('employmentStatus', v)}
-              isAutoFilled={isAF('employmentStatus')}
+              value={formData.Employment_Status}
+              options={['Employed', 'Self-Employed', 'Unemployed', 'Retired', 'Student', 'Part-Time', 'Freelancer']}
+              onSelect={(v) => update('Employment_Status', v)}
+              isAutoFilled={isAF('Employment_Status')}
             />
-            <Stepper
+            <LabeledInput
               label="Adult Dependents"
-              value={formData.adultDependents}
-              onChange={(n) => update('adultDependents', n)}
-              isAutoFilled={isAF('adultDependents')}
+              value={formData.Adult_Dependents}
+              onChangeText={(t) => update('Adult_Dependents', t)}
+              placeholder="0"
+              keyboardType="numeric"
+              isAutoFilled={isAF('Adult_Dependents')}
             />
-            <Stepper
+            <LabeledInput
               label="Child Dependents"
-              value={formData.childDependents}
-              onChange={(n) => update('childDependents', n)}
-              isAutoFilled={isAF('childDependents')}
+              value={formData.Child_Dependents}
+              onChangeText={(t) => update('Child_Dependents', t)}
+              placeholder="0"
+              keyboardType="numeric"
+              isAutoFilled={isAF('Child_Dependents')}
             />
-            <Stepper
+            <LabeledInput
               label="Infant Dependents"
-              value={formData.infantDependents}
-              onChange={(n) => update('infantDependents', n)}
-              isAutoFilled={isAF('infantDependents')}
+              value={formData.Infant_Dependents}
+              onChangeText={(t) => update('Infant_Dependents', t)}
+              placeholder="0"
+              keyboardType="numeric"
+              isAutoFilled={isAF('Infant_Dependents')}
             />
             <LabeledInput
               label="Region Code"
-              value={formData.regionCode}
-              onChangeText={(t) => update('regionCode', t)}
-              placeholder="e.g. CA-90210"
-              isAutoFilled={isAF('regionCode')}
+              value={formData.Region_Code}
+              onChangeText={(t) => update('Region_Code', t)}
+              placeholder="e.g. R-105"
+              isAutoFilled={isAF('Region_Code')}
             />
           </FormCard>
 
@@ -869,34 +1025,37 @@ function FormView({
           >
             <ToggleField
               label="Existing Policyholder?"
-              value={formData.existingPolicyholder}
-              onToggle={(v) => update('existingPolicyholder', v)}
+              value={formData.Existing_Policyholder}
+              onToggle={(v) => update('Existing_Policyholder', v)}
             />
             <LabeledInput
               label="Previous Claims Filed"
-              value={formData.previousClaimsFiled}
-              onChangeText={(t) => update('previousClaimsFiled', t)}
+              value={formData.Previous_Claims_Filed}
+              onChangeText={(t) => update('Previous_Claims_Filed', t)}
               placeholder="0"
               keyboardType="numeric"
+              isAutoFilled={isAF('Previous_Claims_Filed')}
             />
             <LabeledInput
               label="Years Without Claims"
-              value={formData.yearsWithoutClaims}
-              onChangeText={(t) => update('yearsWithoutClaims', t)}
+              value={formData.Years_Without_Claims}
+              onChangeText={(t) => update('Years_Without_Claims', t)}
               placeholder="0"
               keyboardType="numeric"
+              isAutoFilled={isAF('Years_Without_Claims')}
             />
             <LabeledInput
               label="Previous Policy Duration (Months)"
-              value={formData.previousPolicyDuration}
-              onChangeText={(t) => update('previousPolicyDuration', t)}
+              value={formData.Previous_Policy_Duration_Months}
+              onChangeText={(t) => update('Previous_Policy_Duration_Months', t)}
               placeholder="0"
               keyboardType="numeric"
+              isAutoFilled={isAF('Previous_Policy_Duration_Months')}
             />
             <ToggleField
               label="Policy Cancelled Post-Purchase?"
-              value={formData.policyCancelledPostPurchase}
-              onToggle={(v) => update('policyCancelledPostPurchase', v)}
+              value={formData.Policy_Cancelled_Post_Purchase}
+              onToggle={(v) => update('Policy_Cancelled_Post_Purchase', v)}
             />
           </FormCard>
 
@@ -909,59 +1068,150 @@ function FormView({
           >
             <Dropdown
               label="Deductible Tier"
-              value={formData.deductibleTier}
+              value={formData.Deductible_Tier}
               options={['Low', 'Medium', 'High']}
-              onSelect={(v) => update('deductibleTier', v)}
+              onSelect={(v) => update('Deductible_Tier', v)}
+              isAutoFilled={isAF('Deductible_Tier')}
             />
             <Dropdown
               label="Payment Schedule"
-              value={formData.paymentSchedule}
-              options={['Monthly', 'Annual']}
-              onSelect={(v) => update('paymentSchedule', v)}
+              value={formData.Payment_Schedule}
+              options={['Monthly', 'Quarterly', 'Semi-Annual', 'Annual']}
+              onSelect={(v) => update('Payment_Schedule', v)}
+              isAutoFilled={isAF('Payment_Schedule')}
             />
-            <Stepper
+            <LabeledInput
               label="Vehicles on Policy"
-              value={formData.vehiclesOnPolicy}
-              onChange={(n) => update('vehiclesOnPolicy', n)}
-              min={0}
+              value={formData.Vehicles_on_Policy}
+              onChangeText={(t) => update('Vehicles_on_Policy', t)}
+              placeholder="0"
+              keyboardType="numeric"
+              isAutoFilled={isAF('Vehicles_on_Policy')}
             />
             <LabeledInput
               label="Custom Riders Requested"
-              value={formData.customRidersRequested}
-              onChangeText={(t) => update('customRidersRequested', t)}
+              value={formData.Custom_Riders_Requested}
+              onChangeText={(t) => update('Custom_Riders_Requested', t)}
               placeholder="0"
               keyboardType="numeric"
+              isAutoFilled={isAF('Custom_Riders_Requested')}
             />
             <LabeledInput
               label="Grace Period Extensions"
-              value={formData.gracePeriodExtensions}
-              onChangeText={(t) => update('gracePeriodExtensions', t)}
+              value={formData.Grace_Period_Extensions}
+              onChangeText={(t) => update('Grace_Period_Extensions', t)}
               placeholder="0"
               keyboardType="numeric"
+              isAutoFilled={isAF('Grace_Period_Extensions')}
             />
           </FormCard>
 
-          {/* ─── Collapsible: System Data ─── */}
-          <CollapsibleSection title="System Data (Internal)">
-            <LabeledInput
-              label="Broker ID"
-              value={formData.brokerId}
-              onChangeText={() => {}}
-              editable={false}
+          {/* ─── Card 4: Sales & Underwriting ─── */}
+          <FormCard
+            title="Sales & Underwriting"
+            icon={
+              <Ionicons name="briefcase-outline" size={20} color={C.accent} />
+            }
+          >
+            <Dropdown
+              label="Acquisition Channel"
+              value={formData.Acquisition_Channel}
+              options={['Online', 'Agent', 'Phone', 'Broker', 'Direct', 'Referral']}
+              onSelect={(v) => update('Acquisition_Channel', v)}
+              isAutoFilled={isAF('Acquisition_Channel')}
+            />
+            <Dropdown
+              label="Broker Agency Type"
+              value={formData.Broker_Agency_Type}
+              options={['Small', 'Medium', 'Large', 'Corporate', 'Independent']}
+              onSelect={(v) => update('Broker_Agency_Type', v)}
+              isAutoFilled={isAF('Broker_Agency_Type')}
             />
             <LabeledInput
-              label="Policy Start Date"
-              value={formData.policyStartDate}
-              onChangeText={() => {}}
-              editable={false}
+              label="Broker ID"
+              value={formData.Broker_ID}
+              onChangeText={(t) => update('Broker_ID', t)}
+              placeholder="e.g. BRK-4421"
+              isAutoFilled={isAF('Broker_ID')}
+            />
+            <LabeledInput
+              label="Employer ID"
+              value={formData.Employer_ID}
+              onChangeText={(t) => update('Employer_ID', t)}
+              placeholder="e.g. EMP-8832"
+              isAutoFilled={isAF('Employer_ID')}
+            />
+            <LabeledInput
+              label="Days Since Quote"
+              value={formData.Days_Since_Quote}
+              onChangeText={(t) => update('Days_Since_Quote', t)}
+              placeholder="0"
+              keyboardType="numeric"
+              isAutoFilled={isAF('Days_Since_Quote')}
             />
             <LabeledInput
               label="Underwriting Processing Days"
-              value={formData.underwritingProcessingDays}
-              onChangeText={() => {}}
-              editable={false}
+              value={formData.Underwriting_Processing_Days}
+              onChangeText={(t) => update('Underwriting_Processing_Days', t)}
+              placeholder="0"
+              keyboardType="numeric"
+              isAutoFilled={isAF('Underwriting_Processing_Days')}
+            />
+            <LabeledInput
+              label="Policy Amendments Count"
+              value={formData.Policy_Amendments_Count}
+              onChangeText={(t) => update('Policy_Amendments_Count', t)}
+              placeholder="0"
+              keyboardType="numeric"
+              isAutoFilled={isAF('Policy_Amendments_Count')}
+            />
+          </FormCard>
+
+          {/* ─── Collapsible: Timeline ─── */}
+          <CollapsibleSection title="Policy Start Date">
+            <LabeledInput
+              label="Policy Start Year"
+              value={formData.Policy_Start_Year}
+              onChangeText={(t) => update('Policy_Start_Year', t)}
+              placeholder="e.g. 2026"
+              keyboardType="numeric"
+              isAutoFilled={isAF('Policy_Start_Year')}
+            />
+            <Dropdown
+              label="Policy Start Month"
+              value={formData.Policy_Start_Month}
+              options={[
+                'January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December',
+              ]}
+              onSelect={(v) => update('Policy_Start_Month', v)}
+              isAutoFilled={isAF('Policy_Start_Month')}
+            />
+            <LabeledInput
+              label="Policy Start Week"
+              value={formData.Policy_Start_Week}
+              onChangeText={(t) => update('Policy_Start_Week', t)}
+              placeholder="1-52"
+              keyboardType="numeric"
+              isAutoFilled={isAF('Policy_Start_Week')}
+            />
+            <LabeledInput
+              label="Policy Start Day"
+              value={formData.Policy_Start_Day}
+              onChangeText={(t) => update('Policy_Start_Day', t)}
+              placeholder="1-31"
+              keyboardType="numeric"
+              isAutoFilled={isAF('Policy_Start_Day')}
             />
           </CollapsibleSection>
+
+          {/* Submit error */}
+          {submitError && (
+            <View style={s.formErrorBox}>
+              <Ionicons name="alert-circle" size={18} color={C.accent} />
+              <Text style={s.formErrorText}>{submitError}</Text>
+            </View>
+          )}
 
           {/* Submit */}
           <TouchableOpacity
@@ -971,7 +1221,10 @@ function FormView({
             disabled={submitting}
           >
             {submitting ? (
-              <ActivityIndicator color={C.white} />
+              <View style={{ alignItems: 'center', gap: 6 }}>
+                <ActivityIndicator color={C.white} />
+                <Text style={[s.submitBtnText, { fontSize: 13 }]}>Running AI prediction…</Text>
+              </View>
             ) : (
               <>
                 <Text style={s.submitBtnText}>Generate my custom offer</Text>
@@ -991,7 +1244,15 @@ function FormView({
 // Screen 4 — RESULT & EXPLAINABILITY
 // ═══════════════════════════════════════════════════════════════════════════════
 
-function ResultView({ onNavigate }: { onNavigate: (s: Screen) => void }) {
+function ResultView({
+  onNavigate,
+  prediction,
+  explanation,
+}: {
+  onNavigate: (s: Screen) => void;
+  prediction: PredictionResponse;
+  explanation: ExplanationResponse | null;
+}) {
   const a1 = useFadeIn(500, 0);
   const a2 = useFadeIn(600, 200);
   const a3 = useFadeIn(600, 400);
@@ -1008,6 +1269,29 @@ function ResultView({ onNavigate }: { onNavigate: (s: Screen) => void }) {
       useNativeDriver: true,
     }).start();
   }, []);
+
+  // Derive bundle info from prediction
+  const bundleId: number = prediction.result?.predicted_bundle ?? prediction.result?.prediction ?? 0;
+  const bundleName = BUNDLE_NAMES[bundleId] ?? `Bundle ${bundleId}`;
+  const bundleCategory = BUNDLE_CATEGORIES[bundleId] ?? 'Insurance';
+  const bundleIcon = BUNDLE_ICONS[bundleCategory] ?? 'shield-checkmark';
+  const confidencePct = Math.round((prediction.confidence ?? 0) * 100);
+
+  // Sort feature importances by absolute value, take top 6
+  const topFeatures = (explanation?.feature_importances ?? [])
+    .slice()
+    .sort((a, b) => Math.abs(b.importance) - Math.abs(a.importance))
+    .slice(0, 6);
+  const maxImportance = topFeatures.length > 0
+    ? Math.max(...topFeatures.map((f) => Math.abs(f.importance)))
+    : 1;
+
+  /** Make feature names human-readable */
+  const humanize = (name: string) =>
+    name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+
+  /** Bar color cycle */
+  const barColors = [C.primary, C.accent, C.success, '#5C6BC0', '#00897B', '#8D6E63'];
 
   return (
     <SafeAreaView style={s.resultContainer}>
@@ -1038,78 +1322,90 @@ function ResultView({ onNavigate }: { onNavigate: (s: Screen) => void }) {
 
           <View style={s.resultTierBox}>
             <View style={s.resultTierBadge}>
-              <Text style={s.resultTierNumber}>7</Text>
+              <Text style={s.resultTierNumber}>{bundleId}</Text>
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.resultTierName}>
-                Purchased_Coverage_Bundle
+                {bundleName}
               </Text>
               <Text style={s.resultTierDesc}>
-                Tier 7 — Premium Auto & Life
+                Tier {bundleId} — {bundleCategory}
               </Text>
             </View>
+            <Ionicons name={bundleIcon as any} size={28} color={C.accent} />
           </View>
 
           <View style={s.resultStatsRow}>
             <View style={s.resultStat}>
-              <Text style={s.resultStatValue}>$214</Text>
-              <Text style={s.resultStatLabel}>Monthly</Text>
-            </View>
-            <View style={[s.resultStat, s.resultStatMid]}>
-              <Text style={s.resultStatValue}>92%</Text>
+              <Text style={s.resultStatValue}>{confidencePct}%</Text>
               <Text style={s.resultStatLabel}>Confidence</Text>
             </View>
+            <View style={[s.resultStat, s.resultStatMid]}>
+              <Text style={s.resultStatValue}>{prediction.model_version ?? '—'}</Text>
+              <Text style={s.resultStatLabel}>Model</Text>
+            </View>
             <View style={s.resultStat}>
-              <Text style={s.resultStatValue}>A+</Text>
-              <Text style={s.resultStatLabel}>Risk Grade</Text>
+              <Ionicons name={bundleIcon as any} size={24} color={C.primary} />
+              <Text style={s.resultStatLabel}>{bundleCategory}</Text>
             </View>
           </View>
         </Animated.View>
 
         {/* ─── SHAP / AI Insights ─── */}
-        <Animated.View style={[s.shapBox, a3]}>
-          <View style={s.shapHeader}>
-            <MaterialCommunityIcons
-              name="brain"
-              size={20}
-              color={C.accent}
-            />
-            <Text style={s.shapTitle}>SHAP / AI Insights</Text>
-          </View>
-          <Text style={s.shapText}>
-            Based on your dataset profile, your high{' '}
-            <Text style={s.shapHighlight}>Estimated_Annual_Income</Text> and
-            having{' '}
-            <Text style={s.shapHighlight}>Infant_Dependents</Text>{' '}
-            strongly pushed the model toward Bundle 7. Your{' '}
-            <Text style={s.shapHighlight}>Years_Without_Claims</Text> feature
-            maximized your discounts on this specific tier.
-          </Text>
+        {explanation && (
+          <Animated.View style={[s.shapBox, a3]}>
+            <View style={s.shapHeader}>
+              <MaterialCommunityIcons
+                name="brain"
+                size={20}
+                color={C.accent}
+              />
+              <Text style={s.shapTitle}>
+                {explanation.method === 'shap' ? 'SHAP' : 'AI'} Insights
+              </Text>
+            </View>
 
-          <View style={s.shapBars}>
-            <View style={s.shapBarRow}>
-              <Text style={s.shapBarLabel}>Annual Income</Text>
-              <View style={s.shapBarTrack}>
-                <View style={[s.shapBarFill, { width: '85%', backgroundColor: C.primary }]} />
+            {explanation.summary ? (
+              <Text style={s.shapText}>{explanation.summary}</Text>
+            ) : null}
+
+            {topFeatures.length > 0 && (
+              <View style={s.shapBars}>
+                {topFeatures.map((feat, i) => {
+                  const pct = Math.round((Math.abs(feat.importance) / maxImportance) * 100);
+                  const isPositive = feat.importance >= 0;
+                  return (
+                    <View key={feat.feature} style={s.shapBarRow}>
+                      <Text style={s.shapBarLabel} numberOfLines={1}>
+                        {humanize(feat.feature)}
+                      </Text>
+                      <View style={s.shapBarTrack}>
+                        <View
+                          style={[
+                            s.shapBarFill,
+                            {
+                              width: `${pct}%`,
+                              backgroundColor: barColors[i % barColors.length],
+                            },
+                          ]}
+                        />
+                      </View>
+                      <Text style={s.shapBarVal}>
+                        {isPositive ? '+' : ''}{feat.importance.toFixed(2)}
+                      </Text>
+                    </View>
+                  );
+                })}
               </View>
-              <Text style={s.shapBarVal}>+0.42</Text>
-            </View>
-            <View style={s.shapBarRow}>
-              <Text style={s.shapBarLabel}>Infant Deps</Text>
-              <View style={s.shapBarTrack}>
-                <View style={[s.shapBarFill, { width: '65%', backgroundColor: C.accent }]} />
-              </View>
-              <Text style={s.shapBarVal}>+0.31</Text>
-            </View>
-            <View style={s.shapBarRow}>
-              <Text style={s.shapBarLabel}>No Claims Yrs</Text>
-              <View style={s.shapBarTrack}>
-                <View style={[s.shapBarFill, { width: '50%', backgroundColor: C.success }]} />
-              </View>
-              <Text style={s.shapBarVal}>+0.22</Text>
-            </View>
-          </View>
-        </Animated.View>
+            )}
+
+            {explanation.llm_explanation ? (
+              <Text style={[s.shapText, { marginTop: 14, fontStyle: 'italic' }]}>
+                {explanation.llm_explanation}
+              </Text>
+            ) : null}
+          </Animated.View>
+        )}
 
         {/* ─── Action Buttons ─── */}
         <Animated.View style={a4}>
@@ -1152,6 +1448,9 @@ export default function OleaInsuranceApp() {
   const [currentScreen, setCurrentScreen] = useState<Screen>('Home');
   const [isAutoFilled, setIsAutoFilled] = useState(false);
   const [formData, setFormData] = useState<FormData>({ ...EMPTY_FORM });
+  const [ocrMeta, setOcrMeta] = useState<OCRMeta | null>(null);
+  const [prediction, setPrediction] = useState<PredictionResponse | null>(null);
+  const [explanation, setExplanation] = useState<ExplanationResponse | null>(null);
 
   const navigate = useCallback(
     (screen: Screen) => {
@@ -1159,6 +1458,9 @@ export default function OleaInsuranceApp() {
         // Reset everything
         setIsAutoFilled(false);
         setFormData({ ...EMPTY_FORM });
+        setOcrMeta(null);
+        setPrediction(null);
+        setExplanation(null);
       }
       if (screen === 'Form' && !isAutoFilled) {
         // Manual entry — keep empty form
@@ -1169,13 +1471,113 @@ export default function OleaInsuranceApp() {
     [isAutoFilled]
   );
 
-  const handleScanComplete = useCallback(() => {
+  /** Map OCR response to form state */
+  const handleScanComplete = useCallback((ocrResult: OCRResponse) => {
+    const filledKeys = new Set<keyof FormData>();
+    const newForm: FormData = { ...EMPTY_FORM };
+
+    // Boolean fields need special handling
+    const boolFields = new Set<string>([
+      'Existing_Policyholder',
+      'Policy_Cancelled_Post_Purchase',
+    ]);
+
+    for (const [key, value] of Object.entries(ocrResult.fields)) {
+      if (!(key in newForm)) continue;
+      const status = ocrResult.field_statuses[key];
+      if (status !== 'extracted' || value == null) continue;
+
+      if (boolFields.has(key)) {
+        (newForm as any)[key] = Boolean(value);
+      } else {
+        (newForm as any)[key] = String(value);
+      }
+      filledKeys.add(key as keyof FormData);
+    }
+
+    const totalFields = Object.keys(EMPTY_FORM).length;
+    setFormData(newForm);
     setIsAutoFilled(true);
-    setFormData((prev) => ({
-      ...prev,
-      ...AUTOFILL_FORM,
-    }));
+    setOcrMeta({
+      filledKeys,
+      fieldStatuses: ocrResult.field_statuses,
+      fieldConfidences: ocrResult.field_confidences,
+      overallConfidence: ocrResult.confidence,
+      matchedCount: ocrResult.stats.matched_fields,
+      totalFields,
+    });
   }, []);
+
+  /** Convert FormData (all strings/booleans) → PredictionRequest (typed numerics) */
+  const buildPredictionRequest = useCallback((form: FormData): PredictionRequest => {
+    const int = (v: string | boolean, fallback = 0) => {
+      if (typeof v === 'boolean') return v ? 1 : 0;
+      const n = parseInt(String(v), 10);
+      return isNaN(n) ? fallback : n;
+    };
+    const float = (v: string | boolean, fallback = 0) => {
+      const n = parseFloat(String(v));
+      return isNaN(n) ? fallback : n;
+    };
+    /** Extract numeric part from ID strings like 'BRK-4421' → 4421 */
+    const numericId = (v: string): number | undefined => {
+      if (!v) return undefined;
+      const m = v.match(/[\d.]+/);
+      return m ? parseFloat(m[0]) : undefined;
+    };
+    const now = new Date();
+
+    return {
+      Region_Code: form.Region_Code || undefined,
+      Broker_ID: numericId(form.Broker_ID),
+      Broker_Agency_Type: form.Broker_Agency_Type || undefined,
+      Employer_ID: form.Employer_ID || undefined,
+      Estimated_Annual_Income: float(form.Estimated_Annual_Income),
+      Employment_Status: form.Employment_Status || 'Full-time',
+      Adult_Dependents: int(form.Adult_Dependents),
+      Child_Dependents: form.Child_Dependents ? int(form.Child_Dependents) : undefined,
+      Infant_Dependents: int(form.Infant_Dependents),
+      Previous_Policy_Duration_Months: int(form.Previous_Policy_Duration_Months),
+      Previous_Claims_Filed: int(form.Previous_Claims_Filed),
+      Years_Without_Claims: int(form.Years_Without_Claims),
+      Deductible_Tier: form.Deductible_Tier || undefined,
+      Vehicles_on_Policy: int(form.Vehicles_on_Policy),
+      Custom_Riders_Requested: int(form.Custom_Riders_Requested),
+      Acquisition_Channel: form.Acquisition_Channel || undefined,
+      Payment_Schedule: form.Payment_Schedule || 'Monthly',
+      Days_Since_Quote: int(form.Days_Since_Quote),
+      Underwriting_Processing_Days: int(form.Underwriting_Processing_Days),
+      Policy_Start_Month: form.Policy_Start_Month || String(now.getMonth() + 1),
+      Policy_Cancelled_Post_Purchase: int(form.Policy_Cancelled_Post_Purchase),
+      Policy_Start_Year: int(form.Policy_Start_Year, now.getFullYear()),
+      Policy_Start_Week: int(form.Policy_Start_Week, 1),
+      Policy_Start_Day: int(form.Policy_Start_Day, 1),
+      Grace_Period_Extensions: int(form.Grace_Period_Extensions),
+      Existing_Policyholder: int(form.Existing_Policyholder),
+      Policy_Amendments_Count: int(form.Policy_Amendments_Count),
+    };
+  }, []);
+
+  /** Submit form → prediction → explanation → navigate to Result */
+  const handleFormSubmit = useCallback(async (form: FormData) => {
+    const request = buildPredictionRequest(form);
+
+    // 1. Get prediction
+    const pred = await predictFromFeatures(request);
+    setPrediction(pred);
+
+    // 2. Try to get explanation (non-blocking — show results even if this fails)
+    try {
+      const expl = await getExplanation(pred.id);
+      setExplanation(expl);
+    } catch (e) {
+      console.warn('Explanation unavailable:', e);
+      setExplanation(null);
+    }
+
+    // 3. Navigate to Result
+    setCurrentScreen('Result');
+  }, [buildPredictionRequest]);
 
   return (
     <View style={{ flex: 1, backgroundColor: C.appBg }}>
@@ -1188,10 +1590,18 @@ export default function OleaInsuranceApp() {
           isAutoFilled={isAutoFilled}
           formData={formData}
           setFormData={setFormData}
+          ocrMeta={ocrMeta}
           onNavigate={navigate}
+          onSubmitPrediction={handleFormSubmit}
         />
       )}
-      {currentScreen === 'Result' && <ResultView onNavigate={navigate} />}
+      {currentScreen === 'Result' && prediction && (
+        <ResultView
+          onNavigate={navigate}
+          prediction={prediction}
+          explanation={explanation}
+        />
+      )}
     </View>
   );
 }
@@ -1691,6 +2101,56 @@ const s = StyleSheet.create({
     fontWeight: '600',
     marginTop: 10,
     letterSpacing: 0.5,
+  },
+  scanBtnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 24,
+  },
+  galleryBtn: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  scanErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: C.dangerLight,
+    borderRadius: R.md,
+  },
+  scanErrorText: {
+    color: C.accent,
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+
+  /* ─── Form Error ─── */
+  formErrorBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: C.dangerLight,
+    borderRadius: R.md,
+  },
+  formErrorText: {
+    color: C.accent,
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
   },
 
   /* ═══ FORM ═══ */
