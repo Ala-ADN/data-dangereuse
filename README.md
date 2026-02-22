@@ -42,7 +42,7 @@ The system is built as a **modular microservices ecosystem**, decoupling the cli
 
 ```
                    ┌─────────────────────────────────┐
-                   │         FRONTEND (Next.js)      │
+                   │         FRONTEND (Expo Js)      │
                    │  ┌───────────┐  ┌─────────────┐ │
                    │  │ Landing / │  │  Dashboard  │ │
                    │  │ QR Page   │  │  Results    │ │
