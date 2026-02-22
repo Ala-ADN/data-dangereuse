@@ -638,7 +638,7 @@ function HomeView({ onNavigate }: { onNavigate: (s: Screen) => void }) {
             activeOpacity={0.85}
           >
             <View style={s.homeBtnIcon}>
-              <Ionicons name="camera" size={22} color={C.white} />
+              <Ionicons name="cloud-upload-outline" size={22} color={C.white} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.homePrimaryBtnText}>Scan a document</Text>
@@ -692,21 +692,22 @@ function ScannerView({
   const [error, setError] = useState<string | null>(null);
   const scanLine = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const uploadIconBounce = useRef(new Animated.Value(0)).current;
   const anim = useFadeIn(400);
 
-  // Scan line loop
+  // Bounce animation for the upload area icon
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(scanLine, {
-          toValue: 1,
-          duration: 2000,
+        Animated.timing(uploadIconBounce, {
+          toValue: -8,
+          duration: 1200,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
-        Animated.timing(scanLine, {
+        Animated.timing(uploadIconBounce, {
           toValue: 0,
-          duration: 2000,
+          duration: 1200,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
@@ -714,19 +715,42 @@ function ScannerView({
     ).start();
   }, []);
 
-  // Pulse for shutter button
+  // Scan line loop (only active during scanning)
   useEffect(() => {
-    Animated.loop(
+    if (phase !== "scanning") return;
+    scanLine.setValue(0);
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scanLine, {
+          toValue: 1,
+          duration: 1800,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scanLine, {
+          toValue: 0,
+          duration: 1800,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    ).start();
+  }, []);
+
+  // Pulse for upload button
+  useEffect(() => {
+    if (phase !== "upload") return;
+    const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
-          toValue: 1.08,
-          duration: 900,
+          toValue: 1.05,
+          duration: 1000,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(pulseAnim, {
           toValue: 1,
-          duration: 900,
+          duration: 1000,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
@@ -785,6 +809,8 @@ function ScannerView({
     }
   };
 
+  const isScanning = phase === "scanning";
+
   return (
     <SafeAreaView style={s.scanContainer}>
       <Animated.View style={[{ flex: 1 }, anim]}>
@@ -807,6 +833,13 @@ function ScannerView({
                 <View style={[s.corner, s.cornerBL]} />
                 <View style={[s.corner, s.cornerBR]} />
 
+                {/* Scan line */}
+                <Animated.View
+                  style={[
+                    s.scanLineBar,
+                    { transform: [{ translateY: lineTranslateY }] },
+                  ]}
+                />
                 {/* Scan line */}
                 <Animated.View
                   style={[

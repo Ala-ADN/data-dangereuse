@@ -1,0 +1,33 @@
+# ──────────────────────────────────────────────────────────────
+# Production Docker Compose — OLEA Insurance Backend
+# ──────────────────────────────────────────────────────────────
+services:
+  api:
+    image: olea-backend:latest
+    container_name: olea-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/olea.db}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - CORS_ORIGINS=${CORS_ORIGINS:-["*"]}
+      - DEBUG=false
+    volumes:
+      - olea-data:/app/data
+      - olea-models:/models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  olea-data:
+  olea-models:
