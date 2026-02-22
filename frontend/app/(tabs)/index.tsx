@@ -717,7 +717,7 @@ function ScannerView({
 
   // Scan line loop (only active during scanning)
   useEffect(() => {
-    if (phase !== "scanning") return;
+    if (!scanning) return;
     scanLine.setValue(0);
     const loop = Animated.loop(
       Animated.sequence([
@@ -735,11 +735,11 @@ function ScannerView({
         }),
       ]),
     ).start();
-  }, []);
+  }, [scanning]);
 
   // Pulse for upload button
   useEffect(() => {
-    if (phase !== "upload") return;
+    if (scanning) return;
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
@@ -756,7 +756,7 @@ function ScannerView({
         }),
       ]),
     ).start();
-  }, []);
+  }, [scanning]);
 
   const lineTranslateY = scanLine.interpolate({
     inputRange: [0, 1],
@@ -809,7 +809,7 @@ function ScannerView({
     }
   };
 
-  const isScanning = phase === "scanning";
+  const isScanning = scanning;
 
   return (
     <SafeAreaView style={s.scanContainer}>
